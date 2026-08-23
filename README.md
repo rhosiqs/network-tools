@@ -1,37 +1,27 @@
-# Network Connection Test App
+# TCP/53 Block Watch
 
-A user-friendly, modern web application for monitoring your network connection status. This tool automatically tests various network points (Loopback, Gateway, ISP DNS, Google DNS) and reports status and latency in real-time.
+這個分支只做一件事：偵測並記錄 Windows 主機上 **TCP port 53 被封鎖**
+而導致 DNS 解析失敗的情況。
 
-## Features
+純 Windows PowerShell 5.1 撰寫，不需安裝任何直譯器或套件，也沒有網頁介面
+（不依賴 localhost/任何本機服務）—— 只在終端機輸出、並把記錄寫成檔案。
 
--   **Dashboard Interface**: Visual status indicators for all network checks.
--   **Real-time Monitoring**: Automatically refreshes status every few seconds.
--   **Failure Detection**: Instantly alerts you if any check fails.
--   **Continuous Monitoring Mode**: If a failure occurs, the system switches to rapid monitoring until stability is restored.
--   **CSV Logging**: Automatically saves connection logs to `C:\Users\huang\OneDrive\Code\Internet Test` (or local folder if unavailable).
+完整說明（原理、使用方式、記錄欄位、阻擋型態判定表）請看：
+[`tcp53/README.md`](tcp53/README.md)
 
-## How to Use
+## 快速開始
 
-1.  **Start the App**:
-    -   Double-click the **`run_app.bat`** file in this folder.
-    -   The script will automatically set up the environment and open the dashboard in your browser.
+```bash
+tcp53\run_tcp53.bat
+```
 
-2.  **Monitoring**:
-    -   The app starts monitoring immediately.
-    -   Status cards will show green (OK) or red (FAIL) along with latency.
-    -   You can manually Stop/Start monitoring using the buttons at the top.
+或直接執行：
 
-3.  **Logs**:
-    -   Recent activity is shown at the bottom of the page.
-    -   Full logs are saved as CSV files when you close the app or stop monitoring.
+```bash
+powershell -ExecutionPolicy Bypass -File tcp53\Start-Tcp53Watch.ps1
+```
 
-## Technical Details
+---
 
--   **Backend**: Python (Flask)
--   **Frontend**: HTML, CSS (Dark Mode), JavaScript
--   **Requirements**: Python 3.x
-
-## Troubleshooting
-
--   If the browser doesn't open, manually go to `http://127.0.0.1:5000`.
--   If you see "Offline" immediately, ensure the backend window (command prompt) is running.
+> 本分支與 `main` 分支（Python/Flask 的 Network Connection Test app）
+> 架構完全獨立、彼此不相依，不共用任何程式碼或設定。詳見 [`CLAUDE.md`](CLAUDE.md)。

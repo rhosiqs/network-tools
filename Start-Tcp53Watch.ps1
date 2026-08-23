@@ -289,9 +289,9 @@ try {
         if ($Once) { break }
         if ($deadline -and (Get-Date) -ge $deadline) { break }
 
-        # Mirror the main branch's behaviour: tighten the sampling rate while
-        # something is wrong, and hold that rate for a while after it clears
-        # so an intermittent block is captured at useful resolution.
+        # Tighten the sampling rate while a block is active and hold it after
+        # the block clears, so intermittent blocks are captured at useful
+        # resolution.
         if ($anyBlocked) { $lastBlockSeen = Get-Date }
 
         $sleepSeconds = $config.IntervalSeconds

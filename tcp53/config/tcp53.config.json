@@ -1,0 +1,33 @@
+{
+  "_comment": "Configuration for the TCP/53 block watch. Every value can be overridden from the command line; see Start-Tcp53Watch.ps1 -?.",
+
+  "IntervalSeconds": 15,
+  "FastRetrySeconds": 5,
+  "FastRetryHoldSeconds": 60,
+
+  "ConnectTimeoutMs": 3000,
+  "ReadTimeoutMs": 4000,
+  "UdpTimeoutMs": 3000,
+
+  "_probe_comment": "The cheap per-cycle transaction. A small A record so a healthy answer fits one datagram over either transport.",
+  "ProbeName": "www.google.com",
+  "ProbeType": "A",
+
+  "_impact_comment": "The query used to prove real-world damage. A root DNSKEY answer is far larger than 512 bytes, so the server sets the TC bit over UDP and the client is REQUIRED to retry over TCP. If TCP/53 is blocked this name cannot be resolved at all.",
+  "ImpactProbeName": ".",
+  "ImpactProbeType": "DNSKEY",
+
+  "_control_comment": "A non-DNS TCP port on the same server. If it connects while 53 does not, the filtering rule selects on port 53 rather than on the host.",
+  "ControlPort": 443,
+
+  "LogDirectory": "logs",
+  "LogSuccessEveryNCycles": 20,
+
+  "Targets": [
+    { "Name": "Gateway",   "Server": "AUTO_GATEWAY", "Enabled": true,  "Note": "The local router. Often runs a DNS forwarder and is the first device able to filter." },
+    { "Name": "CampusDNS", "Server": "140.120.1.2",  "Enabled": true,  "Note": "Site resolver inherited from the main branch configuration." },
+    { "Name": "HinetDNS",  "Server": "168.95.1.1",   "Enabled": true,  "Note": "Upstream ISP resolver." },
+    { "Name": "GoogleDNS", "Server": "8.8.8.8",      "Enabled": true,  "Note": "Public control. Reachability here separates a site policy from an upstream one." },
+    { "Name": "Cloudflare","Server": "1.1.1.1",      "Enabled": true,  "Note": "Second public control on a different network path." }
+  ]
+}

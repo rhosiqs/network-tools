@@ -1,0 +1,3 @@
+# Captured monitoring output: machine- and session-specific, and it contains
+# MAC addresses and network topology that should not be published.
+logs/

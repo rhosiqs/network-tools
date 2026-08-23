@@ -16,7 +16,13 @@
     Path to the JSON configuration. Defaults to config\tcp53.config.json.
 
 .PARAMETER OutputPath
-    Where to write the report. Defaults to logs\tcp53-diagnosis-<stamp>.txt.
+    Exact path to write the report to. Overrides -LogDirectory and skips
+    the interactive prompt.
+
+.PARAMETER LogDirectory
+    Directory to write the timestamped report into. If neither this nor
+    -OutputPath is given, the script asks for it interactively before
+    running any diagnostics.
 
 .PARAMETER SkipTraceRoute
     Skip the traceroute stage, which is the slowest part of the run.
@@ -29,6 +35,7 @@
 param(
     [string]$ConfigPath,
     [string]$OutputPath,
+    [string]$LogDirectory,
     [switch]$SkipTraceRoute
 )
 
@@ -43,6 +50,22 @@ $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
 if (-not $ConfigPath) { $ConfigPath = Join-Path $ScriptRoot 'config\tcp53.config.json' }
 $config = (Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
+
+# Where the report goes is asked up front, before any diagnostics run, so
+# the operator isn't surprised by the destination after the slow checks
+# (traceroute etc.) have already finished. Pass -OutputPath or
+# -LogDirectory to skip the prompt for unattended runs.
+if (-not $OutputPath) {
+    if (-not $LogDirectory) {
+        $defaultLogDir = $config.LogDirectory
+        if (-not [System.IO.Path]::IsPathRooted($defaultLogDir)) { $defaultLogDir = Join-Path $ScriptRoot $defaultLogDir }
+        $answer = Read-Host "Log directory for the diagnosis report [$defaultLogDir]"
+        $LogDirectory = if ($answer) { $answer } else { $defaultLogDir }
+    }
+    if (-not [System.IO.Path]::IsPathRooted($LogDirectory)) { $LogDirectory = Join-Path $ScriptRoot $LogDirectory }
+    if (-not (Test-Path -LiteralPath $LogDirectory)) { New-Item -ItemType Directory -Path $LogDirectory -Force | Out-Null }
+    $OutputPath = Join-Path $LogDirectory ("tcp53-diagnosis-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.txt')
+}
 
 $report = New-Object 'System.Collections.Generic.List[string]'
 function Add-Line {
@@ -194,13 +217,6 @@ if ($anyRealBlock) {
     Add-Line '  TCP/53 is reachable on every server tested. No block detected.' 'Green'
 }
 Add-Line
-
-if (-not $OutputPath) {
-    $logDir = $config.LogDirectory
-    if (-not [System.IO.Path]::IsPathRooted($logDir)) { $logDir = Join-Path $ScriptRoot $logDir }
-    if (-not (Test-Path -LiteralPath $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
-    $OutputPath = Join-Path $logDir ("tcp53-diagnosis-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.txt')
-}
 
 [System.IO.File]::WriteAllLines($OutputPath, $report, (New-Object System.Text.UTF8Encoding $true))
 Write-Host ("Report saved to: {0}" -f $OutputPath) -ForegroundColor Cyan

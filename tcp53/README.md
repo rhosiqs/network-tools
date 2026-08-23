@@ -56,14 +56,24 @@ tcp53/
 powershell -ExecutionPolicy Bypass -File .\Start-Tcp53Watch.ps1
 ```
 
+啟動後、開始探測之前，兩支腳本都會先問記錄要寫在哪裡：
+
+```
+Log directory [C:\...\tcp53\logs]:
+```
+
+直接按 Enter 採用預設值，或輸入自己指定的路徑。這是為了讓你在動手之前就知道
+記錄會出現在哪，而不是跑完才去找。排程／無人值守執行時，加上 `-LogDirectory`
+即可跳過詢問。
+
 常用參數：
 
 ```bash
-powershell -ExecutionPolicy Bypass -File .\Start-Tcp53Watch.ps1 -Once
+powershell -ExecutionPolicy Bypass -File .\Start-Tcp53Watch.ps1 -Once -LogDirectory C:\tcp53-logs
 ```
 
 ```bash
-powershell -ExecutionPolicy Bypass -File .\Start-Tcp53Watch.ps1 -DurationMinutes 480 -IntervalSeconds 30 -Quiet
+powershell -ExecutionPolicy Bypass -File .\Start-Tcp53Watch.ps1 -DurationMinutes 480 -IntervalSeconds 30 -Quiet -LogDirectory C:\tcp53-logs
 ```
 
 ```bash
@@ -76,8 +86,11 @@ powershell -ExecutionPolicy Bypass -File .\Invoke-Tcp53Diagnose.ps1
 | `-DurationMinutes N` | 跑 N 分鐘後停止；預設 0 表示持續到 Ctrl+C |
 | `-IntervalSeconds N` | 正常狀態下的取樣間隔 |
 | `-Target A,B` | 只測指定目標 |
-| `-LogDirectory <path>` | 指定記錄輸出位置 |
+| `-LogDirectory <path>` | 指定記錄輸出位置；省略時會在腳本一開始互動詢問，排程執行請務必帶上這個參數 |
 | `-Quiet` | 不輸出每筆取樣到畫面，但仍完整寫檔 |
+
+`Invoke-Tcp53Diagnose.ps1` 另外支援 `-OutputPath <file>` 直接指定完整報告檔名
+（會跳過詢問），或同樣用 `-LogDirectory <path>` 指定目錄、檔名自動加時間戳記。
 
 ---
 

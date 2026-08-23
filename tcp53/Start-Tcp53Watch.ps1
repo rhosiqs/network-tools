@@ -39,6 +39,12 @@
 .PARAMETER Quiet
     Suppress the per-sample console line; still writes all log files.
 
+.PARAMETER LogDirectory
+    Where JSONL/CSV/session-log files get written. If omitted, the script
+    asks for it interactively before probing starts (Enter accepts the
+    config default). Pass this explicitly to run unattended, e.g. from
+    Task Scheduler with -Once, since there is no console to prompt.
+
 .EXAMPLE
     .\Start-Tcp53Watch.ps1
     Watch every configured server until Ctrl+C.
@@ -86,7 +92,17 @@ $configText = (Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8).TrimSta
 $config = $configText | ConvertFrom-Json
 
 if ($IntervalSeconds -gt 0) { $config.IntervalSeconds = $IntervalSeconds }
-if ($LogDirectory)          { $config.LogDirectory    = $LogDirectory }
+
+# Where logs go is asked up front, before any probing starts, so the
+# operator never has to guess afterwards where the evidence landed.
+# Pass -LogDirectory to skip the prompt for unattended/scheduled runs.
+if (-not $LogDirectory) {
+    $defaultLogDir = $config.LogDirectory
+    if (-not [System.IO.Path]::IsPathRooted($defaultLogDir)) { $defaultLogDir = Join-Path $ScriptRoot $defaultLogDir }
+    $answer = Read-Host "Log directory [$defaultLogDir]"
+    $LogDirectory = if ($answer) { $answer } else { $defaultLogDir }
+}
+$config.LogDirectory = $LogDirectory
 
 $logDir = $config.LogDirectory
 if (-not [System.IO.Path]::IsPathRooted($logDir)) { $logDir = Join-Path $ScriptRoot $logDir }

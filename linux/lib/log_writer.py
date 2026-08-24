@@ -23,6 +23,7 @@ samples concatenate into a single sheet.
 
 import json
 import os
+import socket
 import sys
 from datetime import datetime, timezone
 
@@ -112,9 +113,8 @@ def new_log_context(directory, session_name='tcp53', log_success_every_n_cycles=
         with open(ctx.csv_path, 'w', encoding='utf-8-sig', newline='') as handle:
             handle.write(','.join(CSV_COLUMNS) + '\r\n')
 
-    import socket as _socket
     write_session_text(ctx, '==== TCP/53 block watch session %s started on %s ===='
-                       % (session, _socket.gethostname()))
+                       % (session, socket.gethostname()))
     return ctx
 
 

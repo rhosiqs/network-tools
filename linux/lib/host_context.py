@@ -18,6 +18,7 @@ None: a missing field must never abort a monitoring run.
 
 import fcntl
 import os
+import pwd
 import re
 import socket
 import struct
@@ -61,6 +62,18 @@ def _run(argv, timeout=10):
         out=proc.stdout.decode('utf-8', 'replace'),
         err=proc.stderr.decode('utf-8', 'replace'),
     )
+
+
+def _user_name():
+    """Who is running this. SUDO_USER first: under sudo the interesting
+    identity is the person, not root."""
+    name = os.environ.get('SUDO_USER')
+    if name:
+        return name
+    try:
+        return pwd.getpwuid(os.getuid()).pw_name
+    except (KeyError, OSError):
+        return os.environ.get('USER') or str(os.getuid())
 
 
 def normalize_mac(raw):
@@ -382,7 +395,7 @@ def host_network_context(target_ip=None):
 
     ctx = SimpleNamespace(
         host_name=socket.gethostname(),
-        user_name=os.environ.get('SUDO_USER') or os.environ.get('USER') or str(os.getuid()),
+        user_name=_user_name(),
         adapter_name=interface,
         adapter_description=None,
         adapter_mac=None,

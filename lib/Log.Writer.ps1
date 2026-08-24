@@ -6,10 +6,9 @@
 
       *.jsonl  one JSON object per line, every field, nothing flattened.
                Append-only, so a crash mid-write costs one line, not the
-               file. This is the forensic record.
+               file.
       *.csv    a fixed column set with a UTF-8 BOM so Excel opens it
-               without an import wizard. This is what gets mailed to a
-               network administrator.
+               without an import wizard.
       console  colour-coded live view.
 
     Write policy matters as much as format. A monitor that logs every

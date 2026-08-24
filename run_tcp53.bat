@@ -6,9 +6,6 @@ echo ===================================================
 echo   TCP/53 Block Watch
 echo ===================================================
 echo.
-echo   Nothing to install. This runs on the PowerShell
-echo   that ships with Windows.
-echo.
 echo   [1] Watch continuously  (Ctrl+C to stop)
 echo   [2] Run one diagnosis and write a report
 echo   [3] Run the self-test

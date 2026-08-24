@@ -8,13 +8,10 @@
     together with the raw Winsock error. That pair is what separates the
     different kinds of blocking from one another:
 
-        Connect + TimedOut          -> packets are being silently dropped
+        Connect + TimedOut          -> nothing answered the SYN
         Connect + ConnectionRefused -> something answered with a RST
-        Receive + TimedOut          -> handshake allowed, payload swallowed
+        Receive + TimedOut          -> handshake allowed, no reply to the query
         Receive + ConnectionReset   -> the query itself triggered a RST
-
-    A tool that only reports "failed" cannot tell those apart, and they
-    point at completely different devices and completely different fixes.
 #>
 
 Set-StrictMode -Version Latest

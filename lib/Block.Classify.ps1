@@ -24,6 +24,10 @@
       UdpBlockedTcpOk         inverse case: UDP filtered, TCP allowed
       DnsServerUnreachable    both transports dead -- not TCP-53-specific
       Indeterminate           evidence does not support a call
+
+    None and DnsServerUnreachable report Blocked=$false: neither carries
+    evidence of a rule against TCP/53. A host that runs no DNS service at
+    all lands in the second one.
 #>
 
 Set-StrictMode -Version Latest
@@ -31,65 +35,70 @@ Set-StrictMode -Version Latest
 $script:BlockTypeInfo = @{
     'None' = @{
         Severity = 'Info'
-        Zh       = 'TCP 53 正常，可完成 DNS over TCP 交易。'
+        Summary  = 'TCP/53 completed a full DNS transaction.'
         Advice   = 'No action required.'
     }
     'TcpRejected' = @{
         Severity = 'High'
-        Zh       = 'TCP 53 遭主動拒絕（收到 RST）；為明確的 reject 規則或該埠無服務。'
+        Summary  = 'TCP/53 was actively refused with a RST.'
         Advice   = 'A device answered the SYN with a RST. Check for a REJECT-style rule on the local host, the gateway, or the DNS server itself.'
     }
     'TcpSilentDrop' = @{
         Severity = 'High'
-        Zh       = 'TCP 53 遭靜默丟棄（SYN 無回應直到逾時）；典型的防火牆 DROP/DENY 規則。'
-        Advice   = 'The SYN is being discarded with no reply. This is the classic firewall DROP. Compare against a control port to confirm the rule targets port 53.'
+        Summary  = 'TCP/53 got no reply to the SYN until the timeout expired.'
+        Advice   = 'The SYN is being discarded with no reply, the shape a firewall DROP rule produces. Compare against a control port to see whether the rule targets port 53.'
     }
     'TcpUnreachable' = @{
         Severity = 'High'
-        Zh       = 'TCP 53 收到 ICMP unreachable；路由或路由器 ACL 阻擋。'
+        Summary  = 'TCP/53 returned an ICMP unreachable.'
         Advice   = 'A router returned an ICMP unreachable. Look at routing and at router ACLs rather than at a stateful firewall.'
     }
     'TcpHandshakeThenNoData' = @{
         Severity = 'High'
-        Zh       = 'TCP 三向交握成功但查詢無回應；中間設備接手連線後丟棄內容。'
-        Advice   = 'The handshake completed with something, but the DNS query got no reply. That pattern means a transparent proxy or DPI accepted the connection on the server behalf and then dropped the payload.'
+        Summary  = 'The TCP handshake completed but the DNS query got no reply.'
+        Advice   = 'Something accepted the connection and did not answer the query. Compare with another server to see whether the payload is being dropped in the path.'
     }
     'TcpResetAfterQuery' = @{
         Severity = 'High'
-        Zh       = '送出 DNS 查詢後連線被 RST；DPI 依封包內容阻擋 DNS over TCP。'
-        Advice   = 'The connection survived until the DNS query was sent, then was reset. The device is inspecting payload, not just port numbers.'
+        Summary  = 'The connection was reset after the DNS query was sent.'
+        Advice   = 'The connection survived until the DNS query was sent, then was reset, so the selection is on payload rather than on the port number alone.'
     }
     'TcpClosedWithoutAnswer' = @{
         Severity = 'Medium'
-        Zh       = '連線被對方正常關閉但未回應查詢；可能是代理伺服器或該伺服器未提供 TCP DNS。'
-        Advice   = 'A clean FIN with no answer. Either a proxy terminated the session or this server genuinely does not serve DNS over TCP; test a second server to tell them apart.'
+        Summary  = 'The peer closed the connection cleanly without answering.'
+        Advice   = 'A clean FIN with no answer. Either a proxy terminated the session or this server does not serve DNS over TCP; test a second server to tell them apart.'
     }
     'TcpAnswerSuspect' = @{
         Severity = 'High'
-        Zh       = 'TCP 53 有回應但內容不符（ID 不符或無法解析）；疑似 DNS 攔截/竄改。'
-        Advice   = 'A reply came back that does not match the query we sent. Treat this as interception until proven otherwise.'
+        Summary  = 'TCP/53 answered with content that does not match the query.'
+        Advice   = 'A reply came back that does not match the query we sent. Check for DNS interception on this path.'
     }
     'UdpBlockedTcpOk' = @{
         Severity = 'Medium'
-        Zh       = 'UDP 53 不通但 TCP 53 正常；與本專案假設相反，通常是 UDP 過濾或伺服器僅開放 TCP。'
-        Advice   = 'The inverse of the expected pattern. Check for UDP filtering; some captive networks force DNS over TCP.'
+        Summary  = 'UDP/53 failed while TCP/53 completed normally.'
+        Advice   = 'The inverse of the pattern this tool looks for. Check for UDP filtering; some captive networks force DNS over TCP.'
     }
     'DnsServerUnreachable' = @{
-        Severity = 'High'
-        Zh       = 'UDP 與 TCP 皆不通；問題不限於 TCP 53，應先確認連線與伺服器本身。'
-        Advice   = 'Both transports failed, so this is not a TCP/53-specific block. Verify link, route and that the server is alive before drawing conclusions.'
+        Severity = 'Low'
+        Summary  = 'Neither UDP/53 nor TCP/53 answered, so this sample says nothing about TCP/53.'
+        Advice   = 'Both transports failed. Either this host does not serve DNS at all, or it is unreachable; check that before reading anything into the TCP result.'
     }
     'Indeterminate' = @{
         Severity = 'Low'
-        Zh       = '證據不足以判定阻擋型態。'
+        Summary  = 'The evidence does not support a block type.'
         Advice   = 'Not enough signal to classify. Re-run with a longer timeout or against another server.'
     }
 }
 
+# The two types that carry no evidence of a TCP/53 block. Keeping them out
+# of Blocked is what stops a router that simply does not run a DNS service
+# from being reported as a filtered one.
+$script:NotABlock = @('None', 'DnsServerUnreachable')
+
 function Get-BlockTypeMetadata {
     param([string]$BlockType)
     if ($script:BlockTypeInfo.ContainsKey($BlockType)) { return $script:BlockTypeInfo[$BlockType] }
-    return @{ Severity = 'Low'; Zh = $BlockType; Advice = '' }
+    return @{ Severity = 'Low'; Summary = $BlockType; Advice = '' }
 }
 
 function Get-BlockScope {
@@ -229,7 +238,8 @@ function Get-BlockClassification {
         }
     }
 
-    $meta = Get-BlockTypeMetadata -BlockType $blockType
+    $meta    = Get-BlockTypeMetadata -BlockType $blockType
+    $blocked = ($script:NotABlock -notcontains $blockType)
 
     $confidence = 'Medium'
     if ($blockType -eq 'None') { $confidence = 'High' }
@@ -238,10 +248,13 @@ function Get-BlockClassification {
     elseif ($blockType -eq 'Indeterminate') { $confidence = 'Low' }
 
     # Scope only means something for a target that is actually blocked.
-    # Reporting "which device is filtering this" for a healthy server reads
-    # as a finding when it is nothing of the sort.
-    if ($blockType -eq 'None') {
-        $scope = [pscustomobject]@{ Scope = 'NotApplicable'; Confidence = 'High'; Reason = 'TCP/53 completed normally; there is no block to localise.' }
+    # Reporting "which device is filtering this" for a server that answered
+    # normally -- or that never answered at all -- reads as a finding when it
+    # is nothing of the sort.
+    if (-not $blocked) {
+        $reason = $(if ($blockType -eq 'None') { 'TCP/53 completed normally; there is no block to localise.' }
+                    else { 'No transport answered, so there is no TCP/53 block to localise.' })
+        $scope = [pscustomobject]@{ Scope = 'NotApplicable'; Confidence = 'High'; Reason = $reason }
     }
     else {
         $scope = Get-BlockScope -TcpResult $TcpResult -GatewayRttMs $GatewayRttMs `
@@ -261,9 +274,9 @@ function Get-BlockClassification {
 
     return [pscustomobject]@{
         BlockType      = $blockType
-        Blocked        = ($blockType -ne 'None')
+        Blocked        = $blocked
         Severity       = $meta.Severity
-        Description    = $meta.Zh
+        Description    = $meta.Summary
         Advice         = $meta.Advice
         Confidence     = $confidence
         PortSpecific   = $portSpecific

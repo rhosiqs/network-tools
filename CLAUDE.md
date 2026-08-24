@@ -19,6 +19,13 @@ Keep the repository to these two branches.
 Commit in small, self-contained increments. One logical change per commit,
 rather than accumulating work into a single large commit.
 
+## Pull requests
+
+Every fix or change goes through a pull request targeting the branch it
+belongs to (`main` or `TCP53`) — never commit a fix straight to that branch.
+Do not merge a PR until its CI/CD checks pass; once they do, merge it back
+into the target branch.
+
 ## Documentation
 
 Documentation states what the code does and how to run it. It does not

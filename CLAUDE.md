@@ -6,8 +6,10 @@
 architecture, and are not to be merged into each other.
 
 - `main` — Python/Flask web dashboard for connection testing.
-- `TCP53` — TCP/53 block detection. Windows PowerShell 5.1, no external
-  dependencies, no network service.
+- `TCP53` — TCP/53 block detection. Two implementations sharing one
+  configuration file and one log format: Windows PowerShell 5.1 at the
+  repository root, and Python 3 standard library under `linux/`. No
+  external dependencies, no network service, on either.
 
 Do not introduce one branch's dependencies or assumptions into the other.
 Keep the repository to these two branches.

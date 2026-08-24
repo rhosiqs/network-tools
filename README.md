@@ -1,5 +1,258 @@
 # TCP/53 Block Watch
 
+Detects and logs cases where TCP port 53 is blocked, causing DNS resolution failures.
+
+Two implementations, both zero external dependencies and no network services, with output
+to terminal messages and log files:
+
+| Platform | Implementation | Requirements |
+|---|---|---|
+| Windows | `*.ps1` in the repo root | Windows' built-in PowerShell 5.1 |
+| Linux | `*.py` under `linux/` | The distro's built-in python3 (3.6+), standard library only |
+
+Both share the same `config/tcp53.config.json`, and use identical judgment tables, log
+fields, and file names, so Windows and Linux logs from the same network can be compared
+directly.
+
+## How it works
+
+DNS normally runs over UDP/53. When a response exceeds a single datagram, the server sets
+the `TC` (truncated) bit, and per RFC 1035 the client must retry over TCP/53. So the
+symptom of a blocked TCP/53 is:
+
+- Regular domain resolution works fine
+- Domains with large responses (DNSSEC, long TXT, many records) fail intermittently
+
+This tool opens sockets directly, using UDP as the control group and TCP as the test
+group — only by comparing the two can the problem be pinned on TCP/53. When UDP itself
+fails, that sample is not evidence of a TCP/53 block; it's recorded as
+`DnsServerUnreachable` and not counted as blocked.
+
+## Usage
+
+### Windows
+
+```
+run_tcp53.bat
+```
+
+or:
+
+```
+powershell -ExecutionPolicy Bypass -File .\Start-Tcp53Watch.ps1
+powershell -ExecutionPolicy Bypass -File .\Invoke-Tcp53Diagnose.ps1
+powershell -ExecutionPolicy Bypass -File .\Test-Tcp53SelfTest.ps1
+```
+
+### Linux
+
+```
+linux/run_tcp53.sh
+```
+
+or:
+
+```
+linux/tcp53-watch.py
+linux/tcp53-diagnose.py
+linux/tcp53-selftest.py
+```
+
+When no log directory is given (Windows `-LogDirectory`, Linux `--log-directory`), the
+script asks for an output location before probing starts; pressing Enter uses the config
+file's default. For scheduled runs (Task Scheduler, cron, systemd timer), pass this
+argument explicitly — the Linux version does not prompt in a non-interactive environment
+and just uses the default.
+
+### Monitoring parameters
+
+| Windows | Linux | Description |
+|---|---|---|
+| `-Once` | `--once` | Run a single round only |
+| `-DurationMinutes N` | `--duration-minutes N` | Stop after N minutes; 0 (default) runs until Ctrl+C |
+| `-IntervalSeconds N` | `--interval-seconds N` | Sampling interval while healthy |
+| `-Target A,B` | `--target A,B` | Test only the given targets |
+| `-LogDirectory <path>` | `--log-directory <path>` | Where to write logs |
+| `-Quiet` | `--quiet` | Don't print each sample to the screen; still logs fully |
+
+### Diagnostic parameters
+
+| Windows | Linux | Description |
+|---|---|---|
+| `-OutputPath <file>` | `--output-path <file>` | Full report file name |
+| `-LogDirectory <path>` | `--log-directory <path>` | Report directory; file name gets an auto timestamp |
+| `-SkipTraceRoute` | `--skip-traceroute` | Skip traceroute (the slowest stage) |
+
+## Per-round flow
+
+For each enabled target:
+
+1. UDP/53 query — control group. A successful UDP query means the link, routing, and
+   server are fine.
+2. TCP/53 query — test group. Full three-way handshake, send query, read response.
+3. TCP/443 control-port connection — a non-DNS port on the same host. If 443 works but
+   53 doesn't, that proves the filtering targets port 53 specifically.
+4. Truncation fallback test — only runs when TCP fails. Query a large response over UDP
+   (default: root `DNSKEY`) to get `TC=1`, then retry over TCP per spec, proving that
+   resolution is genuinely broken.
+
+## BlockType
+
+The baseline judgment is UDP working and TCP not working, further broken down by the
+stage at which TCP failed.
+
+| BlockType | Meaning | Typical cause | Blocked |
+|---|---|---|---|
+| `None` | TCP/53 is fine | — | false |
+| `TcpSilentDrop` | No response after SYN, until timeout | Firewall DROP rule | true |
+| `TcpRejected` | Received RST | REJECT rule, or nothing listens on the port | true |
+| `TcpUnreachable` | Received ICMP unreachable | Routing issue or router ACL | true |
+| `TcpHandshakeThenNoData` | Handshake succeeds but query gets no response | Transparent proxy / DPI dropping the payload | true |
+| `TcpResetAfterQuery` | RST after the query is sent | DPI blocking based on packet content | true |
+| `TcpClosedWithoutAnswer` | Connection closes cleanly but with no answer | Proxy server, or TCP DNS unsupported | true |
+| `TcpAnswerSuspect` | Response doesn't match the query | DNS interception / tampering | true |
+| `UdpBlockedTcpOk` | UDP fails, TCP works | UDP filtering | true |
+| `DnsServerUnreachable` | Both transports fail | Host doesn't provide DNS, or is unreachable | false |
+| `Indeterminate` | Failure mode not in the table | — | true |
+
+`None` and `DnsServerUnreachable` both have `Blocked = false`: neither is evidence of a
+TCP/53 block. A default gateway that doesn't forward DNS falls into the latter case, which
+is normal — it isn't logged as blocked, doesn't shorten the sampling interval, and isn't
+written to the log every round.
+
+## Scope
+
+Guesses where the block is happening; only evaluated when `Blocked` is true, otherwise
+`NotApplicable`:
+
+| Scope | Basis |
+|---|---|
+| `LocalHost` | A matching local firewall rule exists, or the RST RTT is too low to have left the host |
+| `FirstHop` | RST RTT ≈ RTT to the default gateway |
+| `NetworkEdge` | Every target that responded over UDP is blocked |
+| `ServerOrPath` | Only some UDP-responsive targets are blocked |
+
+`NetworkEdge` and `ServerOrPath` only compare targets that responded over UDP. Targets
+where UDP itself failed can't be compared this way — including them would let a host that
+doesn't run DNS skew the overall judgment.
+
+## Logs
+
+| File | Content |
+|---|---|
+| `tcp53-events-YYYYMMDD.jsonl` | One JSON object per line, full field set |
+| `tcp53-events-YYYYMMDD.csv` | Fixed columns, UTF-8 BOM |
+| `tcp53-session-*.log` | Chronological text log |
+| `tcp53-diagnosis-*.log` | Diagnostic report |
+
+Fields:
+
+```
+Timestamp, TimestampUtc, Event,
+AdapterName, AdapterMac, LocalIp, GatewayIp, GatewayMac, Ssid, Bssid,
+TargetName, TargetIp, Port,
+BlockType, Blocked, Severity, Confidence, Scope, ScopeReason,
+TcpPhase, TcpOutcome, TcpSocketError, TcpConnectMs, TcpElapsedMs,
+UdpOutcome, UdpElapsedMs, UdpRcode,
+PortSpecific, ControlPort, ControlPortOutcome,
+ResolutionImpact, TruncationSeen, TcpFallbackOk,
+Description, Evidence
+```
+
+Both platforms write the same fields, in the same order, under the same file names, so
+they can be merged and analyzed directly. There are only three differences: the
+`Evidence` field records `Winsock=` on Windows and `errno=` on Linux; `DhcpEnabled` is left
+blank on Linux (there's no cross-distro source for it); and `AdapterDescription` on Linux
+comes from the device string under `/sys`.
+
+Why MAC addresses are logged: IPs change, so the adapter MAC identifies which host this
+is, while the gateway MAC and Wi-Fi BSSID identify which device was on-path at the time.
+
+Write policy:
+
+- Always written: blocked samples, state transitions (`BlockStarted` / `BlockCleared`)
+- Sampled writes: one `Heartbeat` every `LogSuccessEveryNCycles` rounds while healthy
+  (default 20)
+
+When a block is detected, the sampling interval automatically shortens from
+`IntervalSeconds` to `FastRetrySeconds`, and stays there for `FastRetryHoldSeconds`
+seconds after recovery, to catch intermittent blocking.
+
+## Configuration
+
+`config/tcp53.config.json` — both platforms read the same file. Setting `Server` to
+`AUTO_GATEWAY` uses the default gateway.
+
+## Self-test
+
+Windows:
+
+```
+powershell -ExecutionPolicy Bypass -File .\Test-Tcp53SelfTest.ps1
+```
+
+Covers DNS packet encoding/decoding, MAC normalization, the BlockType judgment table,
+control-port confidence, Scope inference, and log writing.
+
+Linux:
+
+```
+linux/tcp53-selftest.py
+```
+
+Covers the above plus errno mapping, and parsing of `/proc/net/route`, `/proc/net/arp`,
+`resolv.conf`, `iw`, nftables, iptables, and traceroute output. Requires no network access
+and no root.
+
+Both return exit code 0 when everything passes.
+
+For a real-world check, you can temporarily add a rule blocking outbound TCP 53, confirm
+that `TcpSilentDrop` with `Scope=LocalHost` shows up, then remove the rule:
+
+| Platform | Add | Remove |
+|---|---|---|
+| Windows | Add a firewall rule "Block outbound TCP 53" | Delete that rule |
+| Linux | `sudo iptables -I OUTPUT -p tcp --dport 53 -j DROP` | `sudo iptables -D OUTPUT -p tcp --dport 53 -j DROP` |
+
+This tool only reads firewall rules; it never modifies them. On Linux, reading the rules
+themselves requires running as root.
+
+## Environment limitations
+
+Windows:
+
+- Requires Windows 8 / Server 2012 or later (`Get-NetAdapter`, `Find-NetRoute`,
+  `Get-NetNeighbor`)
+- Wi-Fi SSID/BSSID come from `netsh wlan`; wired connections have no such field. Windows 11
+  additionally requires "Location services" to be enabled — without it, `netsh wlan`
+  returns no interface data, so those two fields are left blank while the rest are
+  unaffected
+- Reading firewall rules does not require administrator privileges; when permissions are
+  restricted, that section is left empty
+
+Linux:
+
+- Requires python3 3.6+, standard library only; no pip needed, and PowerShell doesn't need
+  to be installed
+- Interfaces, MAC, gateway, and ARP are read from `/proc`, `/sys`, and ioctl, so it works
+  even without iproute2 installed
+- Reading nftables/iptables rules requires CAP_NET_ADMIN (in practice, root). When run as
+  non-root, that section is marked "unreadable" rather than "no rules" — these mean
+  opposite things and should not be conflated
+- Wi-Fi SSID/BSSID come from `iw` (or `iwconfig`); left blank if not installed
+- traceroute requires `traceroute` or `tracepath`; the path section of the diagnostic
+  report is left blank if neither is installed
+- Gateway RTT uses an unprivileged ICMP socket (governed by `net.ipv4.ping_group_range`);
+  if unavailable, it falls back to calling `ping`, and if that's unavailable too, it's
+  recorded as n/a
+
+---
+
+<details>
+<summary><strong>中文說明 (Chinese)</strong></summary>
+
+# TCP/53 Block Watch
+
 偵測並記錄 TCP port 53 被封鎖而導致 DNS 解析失敗的情況。
 
 兩套實作，皆零外部相依、無網路服務，輸出為終端機訊息與記錄檔：
@@ -214,3 +467,5 @@ Linux：
 - traceroute 需要 `traceroute` 或 `tracepath`，未安裝時診斷報告的路徑段落留空
 - 閘道 RTT 走非特權 ICMP socket（受 `net.ipv4.ping_group_range` 控制），不可用時改呼叫 `ping`，
   再不可用則記為 n/a
+
+</details>

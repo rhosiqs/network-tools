@@ -24,7 +24,7 @@
   "LogSuccessEveryNCycles": 20,
 
   "Targets": [
-    { "Name": "Gateway",   "Server": "AUTO_GATEWAY", "Enabled": true,  "Note": "The local router. Often runs a DNS forwarder and is the first device able to filter." },
+    { "Name": "Gateway",   "Server": "AUTO_GATEWAY", "Enabled": true,  "Note": "The local router. Probed because it is the first device able to filter; a router that runs no DNS forwarder reports DnsServerUnreachable, which is not a block." },
     { "Name": "CampusDNS", "Server": "140.120.1.2",  "Enabled": true,  "Note": "Site resolver." },
     { "Name": "HinetDNS",  "Server": "168.95.1.1",   "Enabled": true,  "Note": "Upstream ISP resolver." },
     { "Name": "GoogleDNS", "Server": "8.8.8.8",      "Enabled": true,  "Note": "Public control. Reachability here separates a site policy from an upstream one." },

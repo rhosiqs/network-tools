@@ -4,14 +4,12 @@ Self-test for the Linux TCP/53 watch: verifies the DNS codec, the block
 classifier, the /proc and /sys readers and the logging pipeline without
 needing a real block, a network, or root.
 
-A monitor for a rare fault is untestable in the field -- by the time the
-block happens you need to already trust the tool. So the decision table
-is exercised here against synthetic probe results, one case per block
-type, the platform readers are run against captured fixtures, and the
-records are written through the real logger so the on-disk shape is the
-same one a genuine incident would produce.
+The decision table is exercised against synthetic probe results, one
+case per block type, the platform readers are run against captured
+fixtures, and the records are written through the real logger so the
+on-disk shape is the one a genuine incident produces.
 
-Exits non-zero if any case fails, so it can gate a scheduled rollout.
+Exits non-zero if any case fails.
 
 Example:
   ./tcp53-selftest.py
@@ -173,6 +171,21 @@ def test_classification():
 
     for case, udp, tcp, expected in cases:
         check(case, expected, block_classify.classify(udp, tcp).block_type)
+
+    # A server that answers on neither transport is not evidence of a
+    # block on TCP/53. Reporting it as one turns every router that runs no
+    # DNS service into a permanent red finding on a healthy network.
+    dead_both = block_classify.classify(
+        DEAD_UDP, fake_probe('TCP', False, 'Connect', 'ConnectTimeout', 'ETIMEDOUT', 3000))
+    check('no DNS at all is not a block', False, dead_both.blocked)
+    check('no DNS at all is not high severity', 'Low', dead_both.severity)
+    check('no DNS at all has no scope', 'NotApplicable', dead_both.scope)
+
+    healthy = block_classify.classify(
+        GOOD_UDP, fake_probe('TCP', True, 'Receive', 'Answered', None, 20))
+    check('healthy target is not blocked', False, healthy.blocked)
+    check('description is english', True,
+          all(ord(ch) < 128 for ch in healthy.description))
 
 
 def test_control_port_confidence():

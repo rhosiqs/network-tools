@@ -20,8 +20,8 @@ DNS 平常走 UDP/53。回應超過單一 datagram 時，伺服器設定 `TC`（
 - 一般網域解析正常
 - 大型回應網域（DNSSEC、長 TXT、多筆記錄）間歇性解析失敗
 
-只做 UDP 查詢的監測工具看不到這個問題。本工具直接開 socket，以 UDP 為對照組、
-TCP 為受測組，兩者比對才能證明問題出在 TCP/53。
+本工具直接開 socket，以 UDP 為對照組、TCP 為受測組，兩者比對才能指出問題出在 TCP/53。
+UDP 不通時該次取樣不構成 TCP/53 的證據，記為 `DnsServerUnreachable` 且不算阻擋。
 
 ## 使用
 
@@ -90,29 +90,37 @@ linux/tcp53-selftest.py
 
 判定基準為 UDP 通、TCP 不通，再依 TCP 失敗階段細分。
 
-| BlockType | 意義 | 通常成因 |
-|---|---|---|
-| `None` | TCP/53 正常 | — |
-| `TcpSilentDrop` | SYN 後無回應至逾時 | 防火牆 DROP 規則 |
-| `TcpRejected` | 收到 RST | REJECT 規則，或該埠無服務 |
-| `TcpUnreachable` | 收到 ICMP unreachable | 路由問題或路由器 ACL |
-| `TcpHandshakeThenNoData` | 交握成功但查詢無回應 | 透明代理／DPI 丟棄內容 |
-| `TcpResetAfterQuery` | 送出查詢後被 RST | DPI 依封包內容阻擋 |
-| `TcpClosedWithoutAnswer` | 正常關閉但無回答 | 代理伺服器，或不支援 TCP DNS |
-| `TcpAnswerSuspect` | 回應與查詢不符 | DNS 攔截／竄改 |
-| `UdpBlockedTcpOk` | UDP 不通、TCP 通 | UDP 過濾 |
-| `DnsServerUnreachable` | 兩種傳輸皆不通 | 連線問題，非 TCP/53 議題 |
+| BlockType | 意義 | 通常成因 | Blocked |
+|---|---|---|---|
+| `None` | TCP/53 正常 | — | false |
+| `TcpSilentDrop` | SYN 後無回應至逾時 | 防火牆 DROP 規則 | true |
+| `TcpRejected` | 收到 RST | REJECT 規則，或該埠無服務 | true |
+| `TcpUnreachable` | 收到 ICMP unreachable | 路由問題或路由器 ACL | true |
+| `TcpHandshakeThenNoData` | 交握成功但查詢無回應 | 透明代理／DPI 丟棄內容 | true |
+| `TcpResetAfterQuery` | 送出查詢後被 RST | DPI 依封包內容阻擋 | true |
+| `TcpClosedWithoutAnswer` | 正常關閉但無回答 | 代理伺服器，或不支援 TCP DNS | true |
+| `TcpAnswerSuspect` | 回應與查詢不符 | DNS 攔截／竄改 | true |
+| `UdpBlockedTcpOk` | UDP 不通、TCP 通 | UDP 過濾 | true |
+| `DnsServerUnreachable` | 兩種傳輸皆不通 | 該主機未提供 DNS，或無法連線 | false |
+| `Indeterminate` | 失敗型態不在對照表內 | — | true |
+
+`None` 與 `DnsServerUnreachable` 的 `Blocked` 為 false：兩者都不構成 TCP/53 被阻擋的
+證據。預設閘道未跑 DNS 轉發時會落在後者，屬正常狀況，不會被記為阻擋、不會縮短取樣
+間隔，也不會逐輪寫入記錄。
 
 ## Scope
 
-阻擋位置推測：
+阻擋位置推測，僅在 `Blocked` 為 true 時判定，否則為 `NotApplicable`：
 
 | Scope | 判定依據 |
 |---|---|
 | `LocalHost` | 本機防火牆有符合規則，或 RST RTT 低到不可能離開本機 |
 | `FirstHop` | RST RTT ≒ 到預設閘道的 RTT |
-| `NetworkEdge` | 所有目標皆被擋 |
-| `ServerOrPath` | 僅部分目標被擋 |
+| `NetworkEdge` | 所有 UDP 有回應的目標皆被擋 |
+| `ServerOrPath` | 僅部分 UDP 有回應的目標被擋 |
+
+`NetworkEdge` 與 `ServerOrPath` 只在 UDP 有回應的目標之間比較。UDP 不通的目標無從
+比較，計入會讓一台不跑 DNS 的主機左右整體判定。
 
 ## 記錄
 
@@ -121,7 +129,7 @@ linux/tcp53-selftest.py
 | `tcp53-events-YYYYMMDD.jsonl` | 每行一個 JSON 物件，完整欄位 |
 | `tcp53-events-YYYYMMDD.csv` | 固定欄位，UTF-8 BOM |
 | `tcp53-session-*.log` | 逐時文字記錄 |
-| `tcp53-diagnosis-*.txt` | 診斷報告 |
+| `tcp53-diagnosis-*.log` | 診斷報告 |
 
 欄位：
 
@@ -164,8 +172,7 @@ Windows：
 powershell -ExecutionPolicy Bypass -File .\Test-Tcp53SelfTest.ps1
 ```
 
-39 項測試，涵蓋 DNS 封包編解碼、MAC 正規化、BlockType 判定表、控制埠信心度、
-Scope 推測與記錄寫入。
+涵蓋 DNS 封包編解碼、MAC 正規化、BlockType 判定表、控制埠信心度、Scope 推測與記錄寫入。
 
 Linux：
 
@@ -173,7 +180,7 @@ Linux：
 linux/tcp53-selftest.py
 ```
 
-72 項測試，除上述範圍外，另涵蓋 errno 對應，以及 `/proc/net/route`、`/proc/net/arp`、
+除上述範圍外，另涵蓋 errno 對應，以及 `/proc/net/route`、`/proc/net/arp`、
 `resolv.conf`、`iw`、nftables、iptables、traceroute 輸出的解析。不需網路、不需 root。
 
 兩者全數通過回傳 exit code 0。
@@ -193,7 +200,8 @@ linux/tcp53-selftest.py
 Windows：
 
 - 需 Windows 8 / Server 2012 以上（`Get-NetAdapter`、`Find-NetRoute`、`Get-NetNeighbor`）
-- Wi-Fi BSSID 取自 `netsh wlan`；有線連線無此欄位
+- Wi-Fi SSID/BSSID 取自 `netsh wlan`；有線連線無此欄位。Windows 11 另需開啟「定位服務」，
+  未開啟時 `netsh wlan` 不回傳介面資料，該兩欄留空，其餘欄位不受影響
 - 讀取防火牆規則不需管理員權限，權限受限時該區塊為空
 
 Linux：

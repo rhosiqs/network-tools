@@ -7,13 +7,10 @@ Every probe reports the *phase* it died in (Connect / Send / Receive)
 together with the raw errno. That pair is what separates the different
 kinds of blocking from one another:
 
-    Connect + ETIMEDOUT      -> packets are being silently dropped
+    Connect + ETIMEDOUT      -> nothing answered the SYN
     Connect + ECONNREFUSED   -> something answered with a RST
-    Receive + ETIMEDOUT      -> handshake allowed, payload swallowed
+    Receive + ETIMEDOUT      -> handshake allowed, no reply to the query
     Receive + ECONNRESET     -> the query itself triggered a RST
-
-A tool that only reports "failed" cannot tell those apart, and they
-point at completely different devices and completely different fixes.
 
 The outcome tokens are identical to the PowerShell probes' tokens, so
 the classifier and the logs do not care which platform produced them.

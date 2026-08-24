@@ -15,10 +15,9 @@
 
     The pair of results is classified into a named block type
     (TcpSilentDrop, TcpRejected, TcpResetAfterQuery, ...) and written to
-    JSONL, CSV and a text session log.
+    JSONL, CSV and a session log.
 
-    Pure Windows PowerShell 5.1. No modules to install, no interpreter to
-    download, nothing outside what ships with Windows.
+    Windows PowerShell 5.1, no modules beyond the ones Windows ships.
 
 .PARAMETER ConfigPath
     Path to the JSON configuration. Defaults to config\tcp53.config.json
@@ -153,7 +152,7 @@ if ($targets.Count -eq 0) { throw 'No enabled targets to probe.' }
 
 Write-Host ''
 Write-Host '=========================================================' -ForegroundColor Cyan
-Write-Host '  TCP/53 Block Watch  -  pure Windows PowerShell' -ForegroundColor Cyan
+Write-Host '  TCP/53 Block Watch' -ForegroundColor Cyan
 Write-Host '=========================================================' -ForegroundColor Cyan
 
 Write-Host 'Inspecting local Windows Firewall for port 53 block rules...' -ForegroundColor DarkGray
@@ -229,10 +228,14 @@ function Invoke-ProbeCycle {
         })
     }
 
-    $tcpFailures = @($samples | Where-Object { -not $_.Tcp.Success }).Count
-    $allBlocked  = $null
-    if ($samples.Count -gt 1 -and $tcpFailures -gt 0) {
-        $allBlocked = ($tcpFailures -eq $samples.Count)
+    # Only a target whose UDP control answered can say anything about
+    # TCP/53. Counting the others would let one host that runs no DNS
+    # service at all decide whether "every server is blocked".
+    $comparable   = @($samples | Where-Object { $_.Udp.Success })
+    $blockedCount = @($comparable | Where-Object { -not $_.Tcp.Success }).Count
+    $allBlocked   = $null
+    if ($comparable.Count -gt 1 -and $blockedCount -gt 0) {
+        $allBlocked = ($blockedCount -eq $comparable.Count)
     }
 
     # Pass 2: classify, log, render.
@@ -266,7 +269,7 @@ function Invoke-ProbeCycle {
         }
     }
 
-    return ($tcpFailures -gt 0)
+    return ($blockedCount -gt 0)
 }
 
 # ----------------------------------------------------------------------

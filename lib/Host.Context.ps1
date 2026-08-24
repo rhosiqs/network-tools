@@ -7,9 +7,8 @@
 
     The MAC addresses are the point of this file. An IP address is leased
     and rotates; the NIC MAC identifies the client that was blocked and
-    the gateway MAC (plus the Wi-Fi BSSID) identifies the specific piece
-    of hardware that was in the path when the block happened. That is what
-    lets a network admin find the device holding the rule.
+    the gateway MAC (plus the Wi-Fi BSSID) records which piece of hardware
+    was in the path when the block happened.
 
     Everything degrades gracefully: on a locked-down machine any single
     lookup may fail, and a missing field must never abort a monitoring run.
@@ -38,11 +37,17 @@ function ConvertTo-NormalizedMac {
 function Get-WirelessContext {
     <#
         netsh is the only built-in that exposes the BSSID (the MAC of the
-        access point actually serving us). Output is localised, so match on
-        the structure -- "key : value" -- rather than on English labels
-        where possible, with the common label spellings as the key filter.
+        access point actually serving us). Its output is localised, so the
+        parsing works on the "key : value" structure and on the two keys
+        Windows leaves untranslated in every language, SSID and BSSID; the
+        signal is taken from whichever value is a bare percentage.
+
+        Windows 11 additionally gates WLAN queries behind Location
+        services. With those off, netsh reports no interface data and the
+        Wi-Fi fields stay empty -- which is why every field here is
+        optional and no caller may depend on one being present.
     #>
-    $ctx = [ordered]@{ IsWireless = $false; Ssid = $null; Bssid = $null; SignalPercent = $null; RadioType = $null; Channel = $null }
+    $ctx = [ordered]@{ IsWireless = $false; Ssid = $null; Bssid = $null; SignalPercent = $null }
     try {
         $raw = & netsh.exe wlan show interfaces 2>$null
         if (-not $raw) { return [pscustomobject]$ctx }
@@ -52,12 +57,15 @@ function Get-WirelessContext {
             $key = $Matches[1].Trim()
             $val = $Matches[2].Trim()
 
-            switch -Regex ($key) {
-                '^(SSID|網路名稱)$'            { if (-not $ctx.Ssid) { $ctx.Ssid = $val; $ctx.IsWireless = $true } }
-                '^(BSSID|基地台)'              { $ctx.Bssid = ConvertTo-NormalizedMac $val; $ctx.IsWireless = $true }
-                '^(Signal|訊號)'               { $ctx.SignalPercent = ($val -replace '[^0-9]', '') }
-                '^(Radio type|無線電類型)'     { $ctx.RadioType = $val }
-                '^(Channel|頻道)$'             { $ctx.Channel = $val }
+            if ($key -match '^BSSID') {
+                $ctx.Bssid = ConvertTo-NormalizedMac $val
+                $ctx.IsWireless = $true
+            }
+            elseif ($key -match '^SSID$') {
+                if (-not $ctx.Ssid) { $ctx.Ssid = $val; $ctx.IsWireless = $true }
+            }
+            elseif ($val -match '^([0-9]{1,3})\s*%$') {
+                $ctx.SignalPercent = $Matches[1]
             }
         }
     }
@@ -260,8 +268,7 @@ function Get-FirstHopPath {
         Records the first few hops toward the DNS server.
     .DESCRIPTION
         Used only in the one-shot diagnostic, never in the monitor loop:
-        it is slow and noisy. The value is that the hop where TTL expiry
-        stops responding often sits next to the device dropping port 53.
+        it is slow and noisy.
 #>
     param([Parameter(Mandatory)][string]$TargetIp, [int]$MaxHops = 8)
 

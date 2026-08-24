@@ -13,11 +13,10 @@ Each cycle, for every configured DNS server:
 
 The pair of results is classified into a named block type
 (TcpSilentDrop, TcpRejected, TcpResetAfterQuery, ...) and written to
-JSONL, CSV and a text session log.
+JSONL, CSV and a session log.
 
-Python 3 standard library only. Nothing to install, no interpreter to
-download beyond the python3 that ships with the distribution. This is
-the Linux counterpart of Start-Tcp53Watch.ps1 and writes the same logs.
+Python 3 standard library only. This is the Linux counterpart of
+Start-Tcp53Watch.ps1 and writes the same logs.
 
 Examples:
   ./tcp53-watch.py
@@ -86,7 +85,7 @@ def ask_log_directory(default_dir):
 
 
 def probe_cycle(targets, config, log, firewall, gateway_rtt_ms, is_first_cycle):
-    """One pass over every target. Returns True if any TCP/53 probe failed."""
+    """One pass over every target. Returns True if any TCP/53 block was seen."""
     # Pass 1: gather raw evidence for every target before judging any of
     # them. Whether *all* targets are blocked is itself a classification
     # input, so no target can be classified in isolation.
@@ -116,10 +115,14 @@ def probe_cycle(targets, config, log, firewall, gateway_rtt_ms, is_first_cycle):
 
         samples.append((target, udp, tcp, control, impact))
 
-    tcp_failures = sum(1 for s in samples if not s[2].success)
+    # Only a target whose UDP control answered can say anything about
+    # TCP/53. Counting the others would let one host that runs no DNS
+    # service at all decide whether "every server is blocked".
+    comparable = [s for s in samples if s[1].success]
+    blocked_count = sum(1 for s in comparable if not s[2].success)
     all_blocked = None
-    if len(samples) > 1 and tcp_failures > 0:
-        all_blocked = (tcp_failures == len(samples))
+    if len(comparable) > 1 and blocked_count > 0:
+        all_blocked = (blocked_count == len(comparable))
 
     # Pass 2: classify, log, render.
     for target, udp, tcp, control, impact in samples:
@@ -154,7 +157,7 @@ def probe_cycle(targets, config, log, firewall, gateway_rtt_ms, is_first_cycle):
                     log, 'BLOCK CLEARED on %s (%s): now %s'
                     % (target.name, target.server, classification.block_type))
 
-    return tcp_failures > 0
+    return blocked_count > 0
 
 
 def main(argv=None):
@@ -170,7 +173,7 @@ def main(argv=None):
 
     write_line('')
     write_line('=========================================================', 'Cyan')
-    write_line('  TCP/53 Block Watch  -  Linux, Python standard library', 'Cyan')
+    write_line('  TCP/53 Block Watch', 'Cyan')
     write_line('=========================================================', 'Cyan')
 
     write_line('Inspecting the local packet filter for port 53 block rules...', 'DarkGray')

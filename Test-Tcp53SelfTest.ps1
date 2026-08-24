@@ -5,13 +5,11 @@
     classifier, and the logging pipeline without needing a real block.
 
 .DESCRIPTION
-    A monitor for a rare fault is untestable in the field -- by the time
-    the block happens you need to already trust the tool. So the decision
-    table is exercised here against synthetic probe results, one case per
-    block type, and the records are written through the real logger so the
-    on-disk shape is the same one a genuine incident would produce.
+    The decision table is exercised against synthetic probe results, one
+    case per block type, and the records are written through the real
+    logger so the on-disk shape is the one a genuine incident produces.
 
-    Exits non-zero if any case fails, so it can gate a scheduled rollout.
+    Exits non-zero if any case fails.
 
 .EXAMPLE
     .\Test-Tcp53SelfTest.ps1
@@ -124,6 +122,20 @@ foreach ($c in $cases) {
     $result = Get-BlockClassification -UdpResult $c.Udp -TcpResult $c.Tcp
     Assert-Equal $c.Case $c.Expect $result.BlockType
 }
+
+# A server that answers on neither transport is not evidence of a block on
+# TCP/53. Reporting it as one turns every router that runs no DNS service
+# into a permanent red finding on a healthy network.
+$deadBoth = Get-BlockClassification -UdpResult $deadUdp `
+                -TcpResult (New-FakeProbe 'TCP' $false 'Connect' 'ConnectTimeout' 'TimedOut' 3000)
+Assert-Equal 'no DNS at all is not a block'      $false          $deadBoth.Blocked
+Assert-Equal 'no DNS at all is not high severity' 'Low'          $deadBoth.Severity
+Assert-Equal 'no DNS at all has no scope'        'NotApplicable' $deadBoth.Scope
+
+$healthy = Get-BlockClassification -UdpResult $goodUdp `
+                -TcpResult (New-FakeProbe 'TCP' $true 'Receive' 'Answered' $null 20)
+Assert-Equal 'healthy target is not blocked'     $false          $healthy.Blocked
+Assert-Equal 'description is english'            $true           ($healthy.Description -notmatch '[^\x00-\x7F]')
 
 Write-Host ''
 Write-Host '=== 4. Confidence from the control port ===' -ForegroundColor Cyan

@@ -6,9 +6,8 @@ so that a logged block can be attributed to a place, not just a time.
 
 The MAC addresses are the point of this file. An IP address is leased
 and rotates; the NIC MAC identifies the client that was blocked and the
-gateway MAC (plus the Wi-Fi BSSID) identifies the specific piece of
-hardware that was in the path when the block happened. That is what
-lets a network admin find the device holding the rule.
+gateway MAC (plus the Wi-Fi BSSID) records which piece of hardware was
+in the path when the block happened.
 
 Everything is read from /proc, /sys and ioctl first, so the tool works
 on a minimal system with no iproute2, no iw and no ping binary. External
@@ -725,8 +724,7 @@ def first_hop_path(target_ip, max_hops=8):
     """Records the first few hops toward the DNS server.
 
     Used only in the one-shot diagnostic, never in the monitor loop: it
-    is slow and noisy. The value is that the hop where TTL expiry stops
-    responding often sits next to the device dropping port 53.
+    is slow and noisy.
 
     Both helpers are optional; a host without either simply reports no
     path, which costs nothing else in the diagnosis.

@@ -14,8 +14,7 @@ for candidate in python3 python; do
 done
 
 if [ -z "$PYTHON" ]; then
-    echo "python3 was not found. Install the distribution's python3 package;"
-    echo "nothing else is required."
+    echo "python3 was not found. Install the distribution's python3 package."
     exit 1
 fi
 
@@ -23,9 +22,6 @@ cat <<'MENU'
 ===================================================
   TCP/53 Block Watch
 ===================================================
-
-  Nothing to install. This runs on the python3 that
-  ships with the distribution.
 
   [1] Watch continuously  (Ctrl+C to stop)
   [2] Run one diagnosis and write a report

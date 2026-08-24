@@ -24,6 +24,10 @@ Block types (BlockType field, stable tokens for log analysis):
   DnsServerUnreachable    both transports dead -- not TCP-53-specific
   Indeterminate           evidence does not support a call
 
+None and DnsServerUnreachable report blocked=False: neither carries
+evidence of a rule against TCP/53. A host that runs no DNS service at all
+lands in the second one.
+
 The tokens and the wording are the same as the PowerShell classifier's:
 a log line means the same thing whichever platform wrote it.
 """
@@ -33,60 +37,65 @@ from types import SimpleNamespace
 BLOCK_TYPE_INFO = {
     'None': {
         'severity': 'Info',
-        'zh': 'TCP 53 正常，可完成 DNS over TCP 交易。',
+        'summary': 'TCP/53 completed a full DNS transaction.',
         'advice': 'No action required.',
     },
     'TcpRejected': {
         'severity': 'High',
-        'zh': 'TCP 53 遭主動拒絕（收到 RST）；為明確的 reject 規則或該埠無服務。',
+        'summary': 'TCP/53 was actively refused with a RST.',
         'advice': 'A device answered the SYN with a RST. Check for a REJECT-style rule on the local host, the gateway, or the DNS server itself.',
     },
     'TcpSilentDrop': {
         'severity': 'High',
-        'zh': 'TCP 53 遭靜默丟棄（SYN 無回應直到逾時）；典型的防火牆 DROP/DENY 規則。',
-        'advice': 'The SYN is being discarded with no reply. This is the classic firewall DROP. Compare against a control port to confirm the rule targets port 53.',
+        'summary': 'TCP/53 got no reply to the SYN until the timeout expired.',
+        'advice': 'The SYN is being discarded with no reply, the shape a firewall DROP rule produces. Compare against a control port to see whether the rule targets port 53.',
     },
     'TcpUnreachable': {
         'severity': 'High',
-        'zh': 'TCP 53 收到 ICMP unreachable；路由或路由器 ACL 阻擋。',
+        'summary': 'TCP/53 returned an ICMP unreachable.',
         'advice': 'A router returned an ICMP unreachable. Look at routing and at router ACLs rather than at a stateful firewall.',
     },
     'TcpHandshakeThenNoData': {
         'severity': 'High',
-        'zh': 'TCP 三向交握成功但查詢無回應；中間設備接手連線後丟棄內容。',
-        'advice': 'The handshake completed with something, but the DNS query got no reply. That pattern means a transparent proxy or DPI accepted the connection on the server behalf and then dropped the payload.',
+        'summary': 'The TCP handshake completed but the DNS query got no reply.',
+        'advice': 'Something accepted the connection and did not answer the query. Compare with another server to see whether the payload is being dropped in the path.',
     },
     'TcpResetAfterQuery': {
         'severity': 'High',
-        'zh': '送出 DNS 查詢後連線被 RST；DPI 依封包內容阻擋 DNS over TCP。',
-        'advice': 'The connection survived until the DNS query was sent, then was reset. The device is inspecting payload, not just port numbers.',
+        'summary': 'The connection was reset after the DNS query was sent.',
+        'advice': 'The connection survived until the DNS query was sent, then was reset, so the selection is on payload rather than on the port number alone.',
     },
     'TcpClosedWithoutAnswer': {
         'severity': 'Medium',
-        'zh': '連線被對方正常關閉但未回應查詢；可能是代理伺服器或該伺服器未提供 TCP DNS。',
-        'advice': 'A clean FIN with no answer. Either a proxy terminated the session or this server genuinely does not serve DNS over TCP; test a second server to tell them apart.',
+        'summary': 'The peer closed the connection cleanly without answering.',
+        'advice': 'A clean FIN with no answer. Either a proxy terminated the session or this server does not serve DNS over TCP; test a second server to tell them apart.',
     },
     'TcpAnswerSuspect': {
         'severity': 'High',
-        'zh': 'TCP 53 有回應但內容不符（ID 不符或無法解析）；疑似 DNS 攔截/竄改。',
-        'advice': 'A reply came back that does not match the query we sent. Treat this as interception until proven otherwise.',
+        'summary': 'TCP/53 answered with content that does not match the query.',
+        'advice': 'A reply came back that does not match the query we sent. Check for DNS interception on this path.',
     },
     'UdpBlockedTcpOk': {
         'severity': 'Medium',
-        'zh': 'UDP 53 不通但 TCP 53 正常；與本專案假設相反，通常是 UDP 過濾或伺服器僅開放 TCP。',
-        'advice': 'The inverse of the expected pattern. Check for UDP filtering; some captive networks force DNS over TCP.',
+        'summary': 'UDP/53 failed while TCP/53 completed normally.',
+        'advice': 'The inverse of the pattern this tool looks for. Check for UDP filtering; some captive networks force DNS over TCP.',
     },
     'DnsServerUnreachable': {
-        'severity': 'High',
-        'zh': 'UDP 與 TCP 皆不通；問題不限於 TCP 53，應先確認連線與伺服器本身。',
-        'advice': 'Both transports failed, so this is not a TCP/53-specific block. Verify link, route and that the server is alive before drawing conclusions.',
+        'severity': 'Low',
+        'summary': 'Neither UDP/53 nor TCP/53 answered, so this sample says nothing about TCP/53.',
+        'advice': 'Both transports failed. Either this host does not serve DNS at all, or it is unreachable; check that before reading anything into the TCP result.',
     },
     'Indeterminate': {
         'severity': 'Low',
-        'zh': '證據不足以判定阻擋型態。',
+        'summary': 'The evidence does not support a block type.',
         'advice': 'Not enough signal to classify. Re-run with a longer timeout or against another server.',
     },
 }
+
+# The two types that carry no evidence of a TCP/53 block. Keeping them out
+# of `blocked` is what stops a router that simply does not run a DNS
+# service from being reported as a filtered one.
+NOT_A_BLOCK = ('None', 'DnsServerUnreachable')
 
 _CONNECT_PHASE = {
     'Refused': 'TcpRejected',
@@ -111,7 +120,7 @@ _RECEIVE_PHASE = {
 
 def block_type_metadata(block_type):
     return BLOCK_TYPE_INFO.get(block_type,
-                               {'severity': 'Low', 'zh': block_type, 'advice': ''})
+                               {'severity': 'Low', 'summary': block_type, 'advice': ''})
 
 
 def block_scope(tcp_result, gateway_rtt_ms=-1, local_firewall_rules=None,
@@ -221,6 +230,7 @@ def classify(udp_result, tcp_result, control_port_result=None, impact_result=Non
                                 % control_port_result.port)
 
     meta = block_type_metadata(block_type)
+    blocked = block_type not in NOT_A_BLOCK
 
     confidence = 'Medium'
     if block_type == 'None':
@@ -233,11 +243,15 @@ def classify(udp_result, tcp_result, control_port_result=None, impact_result=Non
         confidence = 'Low'
 
     # Scope only means something for a target that is actually blocked.
-    # Reporting "which device is filtering this" for a healthy server
-    # reads as a finding when it is nothing of the sort.
-    if block_type == 'None':
-        scope = SimpleNamespace(scope='NotApplicable', confidence='High',
-                                reason='TCP/53 completed normally; there is no block to localise.')
+    # Reporting "which device is filtering this" for a server that answered
+    # normally -- or that never answered at all -- reads as a finding when
+    # it is nothing of the sort.
+    if not blocked:
+        scope = SimpleNamespace(
+            scope='NotApplicable', confidence='High',
+            reason=('TCP/53 completed normally; there is no block to localise.'
+                    if block_type == 'None'
+                    else 'No transport answered, so there is no TCP/53 block to localise.'))
     else:
         scope = block_scope(tcp_result, gateway_rtt_ms=gateway_rtt_ms,
                             local_firewall_rules=local_firewall_rules,
@@ -255,9 +269,9 @@ def classify(udp_result, tcp_result, control_port_result=None, impact_result=Non
 
     return SimpleNamespace(
         block_type=block_type,
-        blocked=(block_type != 'None'),
+        blocked=blocked,
         severity=meta['severity'],
-        description=meta['zh'],
+        description=meta['summary'],
         advice=meta['advice'],
         confidence=confidence,
         port_specific=port_specific,

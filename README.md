@@ -1,5 +1,11 @@
 # TCP/53 Block Watch
 
+<p align="center">
+  <a href="#tcp53-block-watch"><strong>English</strong></a>
+  &nbsp;·&nbsp;
+  <a href="#zh-tw"><strong>繁體中文</strong></a>
+</p>
+
 Detects and logs cases where TCP port 53 is blocked, causing DNS resolution failures.
 
 Two implementations, both zero external dependencies and no network services, with output
@@ -248,10 +254,10 @@ Linux:
 
 ---
 
-<details>
-<summary><strong>中文說明 (Chinese)</strong></summary>
+<details id="zh-tw">
+<summary><strong>繁體中文說明</strong></summary>
 
-# TCP/53 Block Watch
+<br>
 
 偵測並記錄 TCP port 53 被封鎖而導致 DNS 解析失敗的情況。
 

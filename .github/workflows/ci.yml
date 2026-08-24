@@ -1,0 +1,48 @@
+name: TCP53 CI
+
+on:
+  push:
+    branches: [TCP53]
+  pull_request:
+    branches: [TCP53]
+
+jobs:
+  windows-selftest:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse-check PowerShell scripts
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $failed = $false
+          Get-ChildItem -Recurse -Filter *.ps1 -Path . | ForEach-Object {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              Write-Host "Parse errors in $($_.FullName):"
+              $errors | ForEach-Object { Write-Host "  $_" }
+              $failed = $true
+            }
+          }
+          if ($failed) { exit 1 }
+
+      - name: Run self-test
+        shell: powershell
+        run: .\Test-Tcp53SelfTest.ps1
+
+  linux-selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Compile-check Python scripts
+        run: python -m py_compile linux/*.py linux/lib/*.py
+
+      - name: Run self-test
+        run: python3 linux/tcp53-selftest.py

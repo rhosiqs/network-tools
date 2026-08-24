@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-One-shot deep diagnosis of TCP/53 blocking, printed as a report and
-saved to a text file that can be handed to a network administrator.
+One-shot diagnosis of TCP/53 blocking, printed as a report and saved to
+a log file.
 
 Where tcp53-watch.py answers "is it happening right now, and when did it
-happen", this answers "what exactly is broken and who owns the rule". It
-runs the slow checks the monitor loop deliberately skips: a port matrix
-across every server, a traceroute toward the blocked ones, the local
-packet-filter rule set, and the truncation test that demonstrates real
-resolution failure.
+happen", this collects the slow checks the monitor loop skips: a port
+matrix across every server, a traceroute toward the blocked ones, the
+local packet-filter rule set, and the truncation test that shows whether
+resolution actually fails.
 
 Python 3 standard library only. This is the Linux counterpart of
 Invoke-Tcp53Diagnose.ps1.
@@ -59,8 +58,7 @@ class Report(object):
         write_line(text, colour)
 
     def save(self, path):
-        # BOM: the same courtesy the CSV extends to Excel, applied to a
-        # report that will be opened in Notepad on the other side.
+        # BOM, so the file opens as UTF-8 in a Windows editor too.
         with open(path, 'w', encoding='utf-8-sig') as handle:
             handle.write('\n'.join(self.lines) + '\n')
 
@@ -85,7 +83,7 @@ def resolve_output_path(args, config):
     log_dir = tcp53_config.resolve_log_directory(config, SCRIPT_ROOT, log_dir)
     if not os.path.isdir(log_dir):
         os.makedirs(log_dir)
-    return os.path.join(log_dir, 'tcp53-diagnosis-%s.txt'
+    return os.path.join(log_dir, 'tcp53-diagnosis-%s.log'
                         % datetime.now().strftime('%Y%m%d-%H%M%S'))
 
 
@@ -128,11 +126,11 @@ def main(argv=None):
             report.add('      %s %s  local:%s  remote:%s'
                        % (rule.direction, rule.protocol, rule.local_port, rule.remote_port),
                        'Yellow')
-        report.add('  => The block is on THIS machine. Fix it here before looking upstream.',
+        report.add('  => A rule on this machine covers port 53. Check it before looking upstream.',
                    'Yellow')
     elif firewall.readable:
         report.add('  No enabled local block rule covers port 53.')
-        report.add('  => Any block found below originates outside this machine.')
+        report.add('  => Nothing in the local packet filter explains a block found below.')
     else:
         report.add('  Local packet filter not readable: %s' % (firewall.note or 'permission denied'),
                    'Yellow')
@@ -173,10 +171,13 @@ def main(argv=None):
     report.add()
 
     # -------------------------------------------------- classification
-    tcp_failures = sum(1 for f in findings if not f[2].success)
+    # Only a target whose UDP control answered can say anything about TCP/53.
+    comparable = [f for f in findings if f[1].success]
+    blocked_count = sum(1 for f in comparable if not f[2].success)
+    unreachable = sum(1 for f in findings if not f[1].success and not f[2].success)
     all_blocked = None
-    if len(findings) > 1 and tcp_failures > 0:
-        all_blocked = (tcp_failures == len(findings))
+    if len(comparable) > 1 and blocked_count > 0:
+        all_blocked = (blocked_count == len(comparable))
 
     report.add('--- 4. CLASSIFICATION AND IMPACT ---', 'White')
     any_real_block = False
@@ -192,7 +193,7 @@ def main(argv=None):
                                       all_targets_blocked=all_blocked)
 
         colour = {'High': 'Red', 'Medium': 'Yellow', 'Info': 'Green'}.get(cls.severity, 'Gray')
-        if cls.blocked and cls.block_type != 'DnsServerUnreachable':
+        if cls.blocked:
             any_real_block = True
 
         report.add('  [%s] %s' % (target.name, cls.block_type), colour)
@@ -211,8 +212,7 @@ def main(argv=None):
         blocked = [f for f in findings if not f[2].success and f[1].success]
         if blocked:
             report.add('--- 5. PATH TO THE BLOCKED SERVERS ---', 'White')
-            report.add('  The last hop that answers is the neighbourhood of the device '
-                       'holding the rule.')
+            report.add('  The hop where the trace stops answering is where to look next.')
             for target, _udp, _tcp, _ctl in blocked:
                 report.add('  %s (%s):' % (target.name, target.server))
                 path = host_context.first_hop_path(target.server)
@@ -227,16 +227,19 @@ def main(argv=None):
     # --------------------------------------------------------- verdict
     report.add('--- VERDICT ---', 'White')
     if any_real_block:
-        report.add('  TCP/53 IS BEING BLOCKED on at least one path.', 'Red')
-        report.add('  DNS answers larger than one UDP datagram require a TCP retry, so any', 'Red')
-        report.add('  name with a large record set will intermittently fail to resolve.', 'Red')
-    elif tcp_failures > 0:
-        report.add('  No TCP/53-specific block proven. Some servers are unreachable over both',
+        report.add('  %d of %d server(s) answered over UDP/53 but not over TCP/53.'
+                   % (blocked_count, len(comparable)), 'Red')
+        report.add('  Names whose answer does not fit one UDP datagram need the TCP retry, so',
+                   'Red')
+        report.add('  they cannot be resolved through those servers. See the Impact line above.',
+                   'Red')
+    elif unreachable > 0:
+        report.add('  No TCP/53-specific block found. Some servers answered on neither transport,',
                    'Yellow')
-        report.add('  transports, which is a connectivity or server problem rather than a '
-                   'port filter.', 'Yellow')
+        report.add('  which says they serve no DNS or are unreachable, not that port 53 is '
+                   'filtered.', 'Yellow')
     else:
-        report.add('  TCP/53 is reachable on every server tested. No block detected.', 'Green')
+        report.add('  TCP/53 completed on every server tested. No block found.', 'Green')
     report.add()
 
     report.save(output_path)
